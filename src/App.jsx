@@ -233,32 +233,58 @@ function App() {
     }
   }
 
+  /*
+   * Load recent verification history.
+   *
+   * The deployed WeatherGuard contract exposes
+   * get_latest_id(), not get_counter().
+   *
+   * get_latest_id() returns the latest report ID
+   * directly, so we do not subtract 1.
+   */
   async function loadHistory() {
     try {
-      const counter =
+      const latestValue =
         await readClient.readContract({
           address: CONTRACT_ADDRESS,
-          functionName: 'get_counter',
+          functionName: 'get_latest_id',
           args: [],
         })
 
-      const count = Number(counter)
+      const latestIdText =
+        String(latestValue ?? '').trim()
+
+      if (!latestIdText) {
+        setHistory([])
+        return
+      }
+
+      const latestId =
+        Number(latestIdText)
 
       if (
-        !Number.isFinite(count) ||
-        count <= 0
+        !Number.isInteger(latestId) ||
+        latestId < 0
       ) {
         setHistory([])
         return
       }
 
+      console.log(
+        'On-chain latest report ID:',
+        latestId
+      )
+
+      /*
+       * Load up to the latest 6 reports.
+       */
       const start =
-        Math.max(0, count - 6)
+        Math.max(0, latestId - 5)
 
       const items = []
 
       for (
-        let i = count - 1;
+        let i = latestId;
         i >= start;
         i--
       ) {
@@ -291,6 +317,8 @@ function App() {
         'Could not load history:',
         err
       )
+
+      setHistory([])
     }
   }
 
@@ -301,10 +329,6 @@ function App() {
    * 4 = intermediate
    * 5 = intermediate
    * 7 = FINALIZED
-   *
-   * The previous code was waiting for the words
-   * "finalized" / "success", but GenLayerJS in this
-   * project returns numeric statuses.
    */
   async function waitForFinalization(
     client,
@@ -515,42 +539,49 @@ function App() {
       )
 
       /*
-       * Read counter directly from the contract.
+       * Read the latest report ID directly
+       * from the implemented public method.
+       *
+       * IMPORTANT:
+       * The submitted contract exposes
+       * get_latest_id(), not get_counter().
        */
-      const counter =
+      const latestIdValue =
         await readClient.readContract({
           address: CONTRACT_ADDRESS,
-          functionName: 'get_counter',
+          functionName: 'get_latest_id',
           args: [],
         })
 
-      const count = Number(counter)
+      const latestIdText =
+        String(latestIdValue ?? '').trim()
 
-      console.log(
-        'On-chain counter:',
-        count
-      )
-
-      if (
-        !Number.isFinite(count) ||
-        count <= 0
-      ) {
+      if (!latestIdText) {
         throw new Error(
           'Transaction finalized, but no weather report was found on-chain.'
         )
       }
 
-      /*
-       * Latest report ID = counter - 1
-       */
       const latestId =
-        count - 1
+        Number(latestIdText)
+
+      if (
+        !Number.isInteger(latestId) ||
+        latestId < 0
+      ) {
+        throw new Error(
+          'The contract returned an invalid latest report ID.'
+        )
+      }
 
       console.log(
         'Latest report ID:',
         latestId
       )
 
+      /*
+       * Read the finalized on-chain report.
+       */
       const latest =
         await loadReport(latestId)
 
@@ -571,6 +602,10 @@ function App() {
         'Weather verified successfully'
       )
 
+      /*
+       * Refresh verification history
+       * using get_latest_id().
+       */
       await loadHistory()
     } catch (err) {
       console.error(
